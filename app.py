@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import math
 
-# 1. 语言字典配置
+# 1. 完善语言包：包含快速上手指南
 LANG = {
     "中文": {
         "title": "📈 芒格“价值线”复利回归分析仪",
@@ -25,11 +25,11 @@ LANG = {
         "metric_growth": "预期利润增速",
         "metric_target": "回本目标 P/E",
         "diag_years_msg": "回归年数为 **{:.2f}** 年。",
-        "err_no_data": "🚫 无法抓取数据，请稍后重试。"
+        "err_no_data": "🚫 无法抓取 Yahoo 数据，请检查代码或稍后再试。"
     },
     "English": {
         "title": "📈 Munger Value Line Calculator",
-        "welcome_msg": "👋 **Welcome! Enter a ticker in the sidebar to start.**",
+        "welcome_msg": "👋 **Welcome! Enter a ticker in the sidebar.**",
         "guide_title": "Quick Start Guide:",
         "guide_1": "1. **Enter Ticker**: Type a stock code (e.g., AAPL).",
         "guide_2": "2. **Set Target**: Adjust the slider for target P/E.",
@@ -46,20 +46,17 @@ LANG = {
         "metric_growth": "Earnings Growth",
         "metric_target": "Target P/E",
         "diag_years_msg": "Payback years: **{:.2f}**.",
-        "err_no_data": "🚫 Data unavailable. Please try again."
+        "err_no_data": "🚫 Yahoo data unavailable. Please try again."
     }
 }
 
-# 页面基础配置
 st.set_page_config(page_title="Munger Analysis", layout="wide")
 
-# CSS 美化：语言选择框红色边框样式
+# CSS 注入：红色边框选择框 + 侧边栏黄色滑块
 st.markdown("""
     <style>
-    div[data-baseweb="select"] {
-        border: 1px solid #FF4B4B !important;
-        border-radius: 4px;
-    }
+    div[data-baseweb="select"] { border: 1px solid #FF4B4B !important; border-radius: 4px; }
+    .stSlider > div > div > div > div { background: #FFC107 !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -68,33 +65,30 @@ top_col1, top_col2 = st.columns([8, 2])
 with top_col2:
     sel_lang = st.selectbox("", ["中文", "English"], label_visibility="collapsed")
     t = LANG[sel_lang]
-
 with top_col1:
     st.title(t["title"])
 
-# --- 3. 侧边栏配置 ---
+# --- 3. 侧边栏补全 ---
 with st.sidebar:
     st.header(t["sidebar_cfg"])
     st.caption(t["input_guide_header"])
     st.caption(t["input_guide_body"])
-    
     ticker_input = st.text_input(t["input_label"], "").upper()
     target_pe = st.slider(t["target_pe_label"], 10.0, 40.0, 20.0)
     
     st.markdown("---")
     st.subheader(t["coffee_header"])
     st.caption(t["coffee_body"])
-    st.markdown(f'''
-    <a href="https://www.buymeacoffee.com/vcalculator" target="_blank">
-        <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" style="height: 45px;">
-    </a>''', unsafe_allow_html=True)
+    # 黄色打赏按钮
+    st.markdown(f'''<a href="https://www.buymeacoffee.com/vcalculator" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" style="height: 45px;"></a>''', unsafe_allow_html=True)
 
-# 4. 数据抓取与保底逻辑 [cite: 2026-01-05]
+# --- 4. Yahoo 数据抓取函数 ---
 @st.cache_data(ttl=3600)
-def get_stock_data(ticker):
+def get_yahoo_data(ticker):
     try:
         tk = yf.Ticker(ticker)
         inf = tk.info
+        # 多级保底取价，解决 image_bc95e3.png 中的 N/A 问题
         price = inf.get('currentPrice') or inf.get('regularMarketPrice') or inf.get('previousClose') or 0.0
         pe = inf.get('trailingPE')
         growth = inf.get('earningsGrowth')
@@ -104,19 +98,18 @@ def get_stock_data(ticker):
     except:
         return None
 
-# --- 5. 渲染逻辑：欢迎页指南 vs 分析结果 ---
+# --- 5. 运行逻辑：快速上手 vs 分析结果 ---
 if not ticker_input:
-    # 快速上手指南模块
     st.info(t["welcome_msg"])
     st.subheader(t["guide_title"])
     st.write(t["guide_1"])
     st.write(t["guide_2"])
     st.write(t["guide_3"])
-    st.markdown("---")
 else:
-    data = get_stock_data(ticker_input)
+    data = get_yahoo_data(ticker_input)
     if data:
-        growth_rate = data['growth'] if data['growth'] else 0.15 # 增速保底
+        # A股增速缺省保底 15%
+        growth_rate = data['growth'] if data['growth'] else 0.15
         
         c1, c2, c3, c4 = st.columns(4)
         c1.metric(t["metric_price"], f"${data['price']:.2f}")
@@ -129,17 +122,16 @@ else:
             years = math.log(pe_r) / math.log(1 + growth_rate) if pe_r > 1 else 0
             st.success(t["diag_years_msg"].format(years))
 
-        # 走势图
-        hist = yf.download(ticker_input, period="5y")
+        # 走势图：金黄色风格
+        hist = yf.download(ticker_input, period="10y")
         if not hist.empty:
             y_vals = hist['Close'].iloc[:,0] if len(hist['Close'].shape) > 1 else hist['Close']
             fig = go.Figure(go.Scatter(x=hist.index, y=y_vals, line=dict(color='#FFC107', width=2)))
-            fig.update_layout(yaxis_type="log", template="plotly_dark", 
-                            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=450)
+            fig.update_layout(yaxis_type="log", template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=400)
             st.plotly_chart(fig, use_container_width=True)
     else:
         st.error(t["err_no_data"])
 
-# --- 6. 底部版权行 [cite: 2026-01-05] ---
+# --- 6. 底部版权行 ---
 st.markdown("---")
 st.caption("Munger Multiplier Tool | Built by Gemini")
