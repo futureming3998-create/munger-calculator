@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import math
 import time
 
-# 1. 语言字典配置 [cite: 2026-01-05]
+# --- 1. 语言字典配置 [cite: 2026-01-05] ---
 LANG = {
     "中文": {
         "title": "📈 芒格“价值线”复利回归分析仪",
@@ -29,7 +29,9 @@ LANG = {
         "diag_overheat": "⚠️ 诊断：目前明显过热",
         "diag_years_msg": "回归年数为 **{:.2f}** 年。",
         "chart_header": "📊 {} 十年轨迹（对数刻度）",
-        "err_no_data": "🚫 无法抓取数据，请检查代码或稍后再试。"
+        "err_no_data": "🚫 无法抓取数据，请检查代码或稍后再试。",
+        "coffee_header": "☕ 请作者喝杯咖啡",
+        "coffee_body": "如果你觉得这个工具有帮助，欢迎支持！"
     },
     "English": {
         "title": "📈 Munger Value Line Calculator",
@@ -53,30 +55,37 @@ LANG = {
         "diag_overheat": "⚠️ Diagnosis: Currently Overheated",
         "diag_years_msg": "Payback years: **{:.2f}** years.",
         "chart_header": "📊 {} 10-Year Trajectory (Log)",
-        "err_no_data": "🚫 Data unavailable. Please check ticker or retry later."
+        "err_no_data": "🚫 Data unavailable. Please check ticker or retry later.",
+        "coffee_header": "☕ Support the Dev",
+        "coffee_body": "If you like this tool, consider supporting me!"
     }
 }
 
-# 页面初始配置
 st.set_page_config(page_title="Munger Value Line", layout="wide")
 
-# --- 🌟 右上角语言切换逻辑 🌟 ---
-# 使用 columns 将页面顶部分为标题区和语言区
-top_col1, top_col2 = st.columns([8, 2])
+# --- 🌟 CSS 注入：将滑块改为黄色以呼应打赏按钮 🌟 ---
+st.markdown("""
+    <style>
+    /* 滑块颜色更改为黄色 */
+    .stSlider > div > div > div > div { background: #FFC107 !important; }
+    /* 语言选择框的红色微调（呼应截图） */
+    div[data-baseweb="select"] { border: 1px solid #FF4B4B !important; border-radius: 4px; }
+    </style>
+""", unsafe_allow_html=True)
 
+# --- 2. 右上角语言切换逻辑 ---
+top_col1, top_col2 = st.columns([8, 2])
 with top_col2:
-    # 放置在右上角的选择框 [cite: 2026-01-05]
     sel_lang = st.selectbox("", ["中文", "English"], label_visibility="collapsed")
     t = LANG[sel_lang]
 
 with top_col1:
     st.title(t["title"])
 
-# --- 2. 侧边栏配置 ---
+# --- 3. 侧边栏配置 ---
 with st.sidebar:
     st.header(t["sidebar_cfg"])
     
-    # 仅在中文模式下显示 A 股指南 [cite: 2026-01-05]
     if sel_lang == "中文":
         st.caption("⌨️ **A股输入指南：**")
         st.caption("• 沪市(6)加 **.SS**; 深市(0/3)加 **.SZ**")
@@ -84,6 +93,13 @@ with st.sidebar:
     ticker_input = st.text_input(t["input_label"], "").upper()
     target_pe = st.slider(t["target_pe_label"], 10.0, 40.0, 20.0)
     st.info(t["rate_limit_info"])
+
+    # --- 🌟 打赏模块：放置在侧边栏底部 🌟 ---
+    st.markdown("---")
+    st.subheader(t["coffee_header"])
+    st.caption(t["coffee_body"])
+    # 亮黄色打赏按钮
+    st.markdown(f'''<a href="https://www.buymeacoffee.com/vcalculator" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" style="height: 45px;"></a>''', unsafe_allow_html=True)
 
 # --- 数据抓取函数 ---
 @st.cache_data(ttl=3600)
@@ -97,13 +113,12 @@ def get_stock_data(ticker):
 @st.cache_data(ttl=3600)
 def get_stock_history(ticker):
     try:
-        return yf.download(ticker, period="10y")
+        return yf.download(ticker, period="10y", progress=False)
     except:
         return pd.DataFrame()
 
-# --- 3. 运行逻辑 ---
+# --- 4. 运行逻辑 ---
 if not ticker_input:
-    # 静默模式下的欢迎指南 [cite: 2026-01-05]
     st.info(t["welcome_info"])
     st.markdown(t["guide_header"])
     st.write(t["guide_1"])
@@ -113,22 +128,22 @@ else:
     time.sleep(0.5)
     info = get_stock_data(ticker_input)
     
-    if info and 'trailingPE' in info:
-        current_pe = info.get('trailingPE')
+    if info and ('trailingPE' in info or 'forwardPE' in info):
+        # 增加保底逻辑防止 N/A
+        current_pe = info.get('trailingPE') or info.get('forwardPE')
         growth_rate = info.get('earningsGrowth', 0.15)
-        price = info.get('currentPrice', 0)
+        price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
         name = info.get('longName', ticker_input)
 
-        # 指标看板
         col1, col2, col3, col4 = st.columns(4)
         col1.metric(t["metric_price"], f"${price:.2f}" if price else "N/A")
-        col2.metric(t["metric_pe"], f"{current_pe:.2f}")
+        col2.metric(t["metric_pe"], f"{current_pe:.2f}" if current_pe else "N/A")
         col3.metric(t["metric_growth"], f"{growth_rate*100:.1f}%")
         col4.metric(t["metric_target"], f"{target_pe}")
 
-        # 核心诊断逻辑 [cite: 2026-01-05]
-        if growth_rate > 0:
-            years = math.log(current_pe / target_pe) / math.log(1 + growth_rate) if current_pe > target_pe else 0
+        if growth_rate and growth_rate > 0 and current_pe:
+            pe_ratio = current_pe / target_pe
+            years = math.log(pe_ratio) / math.log(1 + growth_rate) if pe_ratio > 1 else 0
             
             if current_pe <= target_pe:
                 st.success(t["diag_gold_pit"])
@@ -143,14 +158,14 @@ else:
                 st.warning(t["diag_overheat"])
                 st.write(t["diag_years_msg"].format(years))
         
-        # 图表展示
         st.subheader(t["chart_header"].format(name))
         hist = get_stock_history(ticker_input)
         if not hist.empty:
             fig = go.Figure()
+            # 兼容处理
             y_data = hist['Close'] if isinstance(hist['Close'], pd.Series) else hist['Close'].iloc[:, 0]
-            fig.add_trace(go.Scatter(x=hist.index, y=y_data, name='Price', line=dict(color='#1f77b4')))
-            fig.update_layout(yaxis_type="log", template="plotly_white", height=400)
+            fig.add_trace(go.Scatter(x=hist.index, y=y_data, name='Price', line=dict(color='#FFC107', width=2)))
+            fig.update_layout(yaxis_type="log", template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, use_container_width=True)
     else:
         st.error(t["err_no_data"])
