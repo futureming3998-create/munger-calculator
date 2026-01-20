@@ -26,9 +26,6 @@ with st.sidebar:
     ticker_input = st.text_input("输入股票代码 (如 AAPL, MSFT, COST)", "").upper()
     target_pe = st.slider("目标合理市盈率 (P/E)", 10.0, 40.0, 20.0)
     st.info("注：若遇到 Rate Limited，请稍等30秒再切换代码。")
-    ticker_input = st.text_input("输入股票代码 (如 AAPL, MSFT, COST)", "").upper()
-    target_pe = st.slider("目标合理市盈率 (P/E)", 10.0, 40.0, 20.0)
-    st.info("注：若遇到 Rate Limited，请稍等30秒再切换代码。")
 
 # 数据抓取函数（带缓存）
 @st.cache_data(ttl=3600)
