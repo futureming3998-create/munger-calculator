@@ -15,7 +15,7 @@ LANG = {
         "guide_2": "2. **设定目标**：调整滑块选择你认为合理的“目标市盈率”。",
         "guide_3": "3. **看懂结论**：系统自动计算“黄金坑”或“过热”诊断。",
         "sidebar_cfg": "🔍 配置中心",
-        "input_label": "输入股票代码 (如 AAPL, MSFT, COST)",
+        "input_label": "输入股票代码 (如 AAPL, MSFT)",
         "target_pe_label": "目标合理市盈率 (P/E)",
         "rate_limit_info": "注：若遇到限制，请稍等30秒再切换代码。",
         "metric_price": "当前股价",
@@ -39,7 +39,7 @@ LANG = {
         "guide_2": "2. **Set Target**: Adjust the slider for target P/E.",
         "guide_3": "3. **Read Result**: System calculates if it's a 'Value Pit'.",
         "sidebar_cfg": "🔍 Configuration",
-        "input_label": "Enter Ticker (e.g., AAPL, MSFT, COST)",
+        "input_label": "Enter Ticker (e.g., AAPL, MSFT)",
         "target_pe_label": "Target P/E Ratio",
         "rate_limit_info": "Note: If Rate Limited, wait 30s before retrying.",
         "metric_price": "Price",
@@ -60,12 +60,20 @@ LANG = {
 # 页面初始配置
 st.set_page_config(page_title="Munger Value Line", layout="wide")
 
-# --- 2. 侧边栏与语言切换 ---
+# --- 🌟 右上角语言切换逻辑 🌟 ---
+# 使用 columns 将页面顶部分为标题区和语言区
+top_col1, top_col2 = st.columns([8, 2])
+
+with top_col2:
+    # 放置在右上角的选择框 [cite: 2026-01-05]
+    sel_lang = st.selectbox("", ["中文", "English"], label_visibility="collapsed")
+    t = LANG[sel_lang]
+
+with top_col1:
+    st.title(t["title"])
+
+# --- 2. 侧边栏配置 ---
 with st.sidebar:
-    # 语言切换器
-    sel_lang = st.selectbox("🌐 Language / 语言", ["中文", "English"])
-    t = LANG[sel_lang]  # 映射当前语言包 [cite: 2026-01-05]
-    
     st.header(t["sidebar_cfg"])
     
     # 仅在中文模式下显示 A 股指南 [cite: 2026-01-05]
@@ -77,7 +85,7 @@ with st.sidebar:
     target_pe = st.slider(t["target_pe_label"], 10.0, 40.0, 20.0)
     st.info(t["rate_limit_info"])
 
-# 数据抓取函数
+# --- 数据抓取函数 ---
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
     try:
@@ -93,10 +101,7 @@ def get_stock_history(ticker):
     except:
         return pd.DataFrame()
 
-# --- 3. 页面标题 ---
-st.title(t["title"])
-
-# --- 4. 运行逻辑 ---
+# --- 3. 运行逻辑 ---
 if not ticker_input:
     # 静默模式下的欢迎指南 [cite: 2026-01-05]
     st.info(t["welcome_info"])
