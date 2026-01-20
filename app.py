@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import math
 
-# 1. 完善语言包：包含快速上手指南
+# 1. 语言字典：包含快速上手指南与侧边栏文案
 LANG = {
     "中文": {
         "title": "📈 芒格“价值线”复利回归分析仪",
@@ -52,7 +52,7 @@ LANG = {
 
 st.set_page_config(page_title="Munger Analysis", layout="wide")
 
-# CSS 注入：红色边框选择框 + 侧边栏黄色滑块
+# CSS 注入：红色边框选择框与亮黄色滑块
 st.markdown("""
     <style>
     div[data-baseweb="select"] { border: 1px solid #FF4B4B !important; border-radius: 4px; }
@@ -60,7 +60,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. 顶部布局：标题与红色样式选择框 ---
+# --- 2. 顶部布局：右上角红色样式选择框 ---
 top_col1, top_col2 = st.columns([8, 2])
 with top_col2:
     sel_lang = st.selectbox("", ["中文", "English"], label_visibility="collapsed")
@@ -79,16 +79,16 @@ with st.sidebar:
     st.markdown("---")
     st.subheader(t["coffee_header"])
     st.caption(t["coffee_body"])
-    # 黄色打赏按钮
+    # 亮黄色打赏按钮
     st.markdown(f'''<a href="https://www.buymeacoffee.com/vcalculator" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" style="height: 45px;"></a>''', unsafe_allow_html=True)
 
-# --- 4. Yahoo 数据抓取函数 ---
+# --- 4. Yahoo 数据抓取（多级保底修复 N/A） ---
 @st.cache_data(ttl=3600)
 def get_yahoo_data(ticker):
     try:
         tk = yf.Ticker(ticker)
         inf = tk.info
-        # 多级保底取价，解决 image_bc95e3.png 中的 N/A 问题
+        # 修复逻辑：依次尝试实时价、收盘价和昨收价
         price = inf.get('currentPrice') or inf.get('regularMarketPrice') or inf.get('previousClose') or 0.0
         pe = inf.get('trailingPE')
         growth = inf.get('earningsGrowth')
@@ -98,7 +98,7 @@ def get_yahoo_data(ticker):
     except:
         return None
 
-# --- 5. 运行逻辑：快速上手 vs 分析结果 ---
+# --- 5. 渲染逻辑：快速指南 vs 分析结果 ---
 if not ticker_input:
     st.info(t["welcome_msg"])
     st.subheader(t["guide_title"])
@@ -108,8 +108,7 @@ if not ticker_input:
 else:
     data = get_yahoo_data(ticker_input)
     if data:
-        # A股增速缺省保底 15%
-        growth_rate = data['growth'] if data['growth'] else 0.15
+        growth_rate = data['growth'] if data['growth'] else 0.15 # 增速保底
         
         c1, c2, c3, c4 = st.columns(4)
         c1.metric(t["metric_price"], f"${data['price']:.2f}")
@@ -122,7 +121,7 @@ else:
             years = math.log(pe_r) / math.log(1 + growth_rate) if pe_r > 1 else 0
             st.success(t["diag_years_msg"].format(years))
 
-        # 走势图：金黄色风格
+        # 走势图：黄色曲线
         hist = yf.download(ticker_input, period="10y")
         if not hist.empty:
             y_vals = hist['Close'].iloc[:,0] if len(hist['Close'].shape) > 1 else hist['Close']
