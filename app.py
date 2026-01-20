@@ -31,7 +31,25 @@ def get_stock_data(ticker_symbol):
 
 @st.cache_data(ttl=3600)
 def get_stock_history(ticker_symbol):
-    return yf.download(ticker_symbol, period="10y", progress=False)
+    try:
+        # 使用 yf.download 并强制平坦化数据
+        df = yf.download(ticker_symbol, period="10y", interval="1d", progress=False)
+        
+        # 处理多层索引 (MultiIndex) 问题
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            
+        # 确保索引是干净的日期格式
+        df.index = pd.to_datetime(df.index)
+        
+        # 检查是否真的有数据
+        if df.empty or 'Close' not in df.columns:
+            return pd.DataFrame()
+            
+        return df[['Close']] 
+    except Exception as e:
+        st.error(f"图表数据抓取失败: {e}")
+        return pd.DataFrame()
 
 # 运行逻辑
 if ticker_input:
