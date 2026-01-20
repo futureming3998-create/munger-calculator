@@ -4,180 +4,112 @@ import pandas as pd
 import plotly.graph_objects as go
 import math
 import time
-import requests
 
-# 1. 语言字典配置 [cite: 2026-01-05]
+# 1. 多语言配置
 LANG = {
     "中文": {
-        "title": "📈 芒格“价值线”复利回归分析仪",
-        "welcome_info": "👋 **欢迎！请在左侧输入股票代码开始分析。**",
-        "guide_header": "### 快速上手指南：",
-        "guide_1": "1. **输入代码**：在左侧输入股票代码（如 AAPL）。",
-        "guide_2": "2. **设定目标**：调整滑块选择你认为合理的“目标市盈率”。",
-        "guide_3": "3. **看懂结论**：系统自动计算“黄金坑”或“过热”诊断。",
+        "title": "📈 芒格“价值线”分析仪 2.0",
         "sidebar_cfg": "🔍 配置中心",
-        "input_label": "输入股票代码 (如 AAPL, MSFT)",
-        "target_pe_label": "目标合理市盈率 (P/E)",
-        "rate_limit_info": "注：若遇到限制，请稍等30秒再切换代码。",
+        "input_label": "输入股票代码 (如 600519.SS / AAPL)",
         "metric_price": "当前股价",
         "metric_pe": "当前 P/E (TTM)",
-        "metric_growth": "预期利润增速",
-        "metric_target": "回本目标 P/E",
-        "diag_gold_pit": "🌟 诊断：极具吸引力（黄金坑）",
-        "diag_gold_msg": "当前 P/E 已低于目标值。内在价值极高！",
-        "diag_attractive": "✅ 诊断：极具吸引力",
-        "diag_fair": "⚖️ 诊断：合理区间",
-        "diag_overheat": "⚠️ 诊断：目前明显过热",
+        "metric_growth": "核心利润增速",
+        "metric_target": "目标 P/E",
         "diag_years_msg": "回归年数为 **{:.2f}** 年。",
-        "chart_header": "📊 {} 十年轨迹（对数刻度）",
-        "err_no_data": "🚫 无法抓取真实数据，该股票可能暂不支持分析。"
+        "err_no_data": "🚫 无法解析该股财务报表，请确认代码是否正确。"
     },
     "English": {
-        "title": "📈 Munger Value Line Calculator",
-        "welcome_info": "👋 **Welcome! Enter a ticker in the sidebar to start.**",
-        "guide_header": "### Quick Start Guide:",
-        "guide_1": "1. **Enter Ticker**: Type a stock code (e.g., AAPL).",
-        "guide_2": "2. **Set Target**: Adjust the slider for target P/E.",
-        "guide_3": "3. **Read Result**: System calculates if it's a 'Value Pit'.",
+        "title": "📈 Munger Value Line 2.0",
         "sidebar_cfg": "🔍 Configuration",
-        "input_label": "Enter Ticker (e.g., AAPL, MSFT)",
-        "target_pe_label": "Target P/E Ratio",
-        "rate_limit_info": "Note: If Rate Limited, wait 30s before retrying.",
+        "input_label": "Enter Ticker (e.g., AAPL / 000001.SZ)",
         "metric_price": "Price",
-        "metric_pe": "Current P/E (TTM)",
+        "metric_pe": "Current P/E",
         "metric_growth": "Earnings Growth",
         "metric_target": "Target P/E",
-        "diag_gold_pit": "🌟 Diagnosis: Deep Value (Golden Pit)",
-        "diag_gold_msg": "Current P/E is below target. High intrinsic value!",
-        "diag_attractive": "✅ Diagnosis: Highly Attractive",
-        "diag_fair": "⚖️ Diagnosis: Fair Value",
-        "diag_overheat": "⚠️ Diagnosis: Currently Overheated",
-        "diag_years_msg": "Payback years: **{:.2f}** years.",
-        "chart_header": "📊 {} 10-Year Trajectory (Log)",
-        "err_no_data": "🚫 Data unavailable for this specific ticker."
+        "diag_years_msg": "Payback years: **{:.2f}**.",
+        "err_no_data": "🚫 Financials unavailable for this ticker."
     }
 }
 
-st.set_page_config(page_title="Munger Value Line", layout="wide")
+st.set_page_config(page_title="Munger Analysis", layout="wide")
 
-# --- 右上角语言切换 ---
-top_col1, top_col2 = st.columns([8, 2])
-with top_col2:
-    sel_lang = st.selectbox("", ["中文", "English"], label_visibility="collapsed")
-    t = LANG[sel_lang]
-with top_col1:
-    st.title(t["title"])
+# 主题美化：直接注入 CSS 让控件变黄
+st.markdown("""
+    <style>
+    .stSlider > div > div > div > div { background: #FFC107 !important; }
+    .stTextInput > div > div > input { border-color: #FFC107 !important; }
+    </style>
+""", unsafe_allow_html=True)
 
-# --- 2. 侧边栏配置 ---
+# 语言切换
+sel_lang = st.sidebar.selectbox("Language", ["中文", "English"])
+t = LANG[sel_lang]
+st.title(t["title"])
+
+# 侧边栏
 with st.sidebar:
     st.header(t["sidebar_cfg"])
-    if sel_lang == "中文":
-        st.caption("⌨️ **A股输入指南：**")
-        st.caption("• 沪市(6)加 **.SS**; 深市(0/3)加 **.SZ**")
-    
     ticker_input = st.text_input(t["input_label"], "").upper()
-    target_pe = st.slider(t["target_pe_label"], 10.0, 40.0, 20.0)
-    st.info(t["rate_limit_info"])
-
+    target_pe = st.slider(t["metric_target"], 10.0, 40.0, 20.0)
+    
     st.markdown("---")
-    st.subheader("☕ " + ("请作者喝杯咖啡" if sel_lang == "中文" else "Support the Dev"))
-    st.markdown(f"""
-    <a href="https://www.buymeacoffee.com/vcalculator" target="_blank">
-        <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" style="height: 40px!important;width: 145px!important;" >
-    </a>""", unsafe_allow_html=True)
+    st.markdown(f'<a href="https://www.buymeacoffee.com/vcalculator" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" style="height: 40px;"></a>', unsafe_allow_html=True)
 
-# --- 数据引擎 (修复股价缺失问题) --- [cite: 2026-01-05]
+# 核心引擎
 @st.cache_data(ttl=3600)
-def get_stock_data(ticker):
-    # 双引擎：Alpha Vantage 取财务，Yahoo 取实时价
-    av_ticker = ticker.replace(".SS", ".SHH").replace(".SZ", ".SHZ")
-    api_key = "VQ04WNKXTQP0H7B3" 
-    url = f'https://www.alphavantage.co/query?function=OVERVIEW&symbol={av_ticker}&apikey={api_key}'
-    
+def get_pro_data(ticker):
     try:
-        # 1. 获取财务数据
-        av_data = requests.get(url, timeout=5).json()
         tk = yf.Ticker(ticker)
-        yf_info = tk.info
+        inf = tk.info
         
-        # 2. 真实性合并：优先取 API 数据，缺失则从财务报表现算
-        pe = av_data.get('TrailingPE') or yf_info.get('trailingPE')
-        growth = av_data.get('QuarterlyEarningsGrowthYOY') or yf_info.get('earningsGrowth')
+        # 1. 价格修复逻辑 [cite: 2026-01-05]
+        price = inf.get('currentPrice') or inf.get('regularMarketPreviousClose') or 0.0
         
-        # 3. 实时股价修复：从 Yahoo Finance 获取最新价 [cite: 2026-01-05]
-        price = yf_info.get('currentPrice') or yf_info.get('regularMarketPrice')
+        # 2. 针对 A 股的财务报表深度分析 [cite: 2026-01-05]
+        pe = inf.get('trailingPE')
+        growth = inf.get('earningsGrowth')
         
+        # 如果 info 缺失（A股常见），直接分析利润表
+        if not pe or not growth:
+            fin = tk.financials
+            if not fin.empty:
+                # 计算 PE: 市值 / 净利润
+                net_income = fin.loc['Net Income'].iloc[0]
+                m_cap = inf.get('marketCap')
+                if not pe and m_cap and net_income > 0:
+                    pe = m_cap / net_income
+                # 计算增速: (今年-去年)/去年
+                if not growth and len(fin.loc['Net Income']) > 1:
+                    growth = (fin.loc['Net Income'].iloc[0] - fin.loc['Net Income'].iloc[1]) / abs(fin.loc['Net Income'].iloc[1])
+
         if pe and growth:
-            return {
-                'trailingPE': float(pe),
-                'earningsGrowth': float(growth),
-                'longName': av_data.get('Name') or yf_info.get('longName', ticker),
-                'currentPrice': float(price) if price else 0.0
-            }
+            return {'pe': float(pe), 'growth': float(growth), 'price': float(price), 'name': inf.get('longName', ticker)}
         return None
     except:
         return None
 
-@st.cache_data(ttl=3600)
-def get_stock_history(ticker):
-    try:
-        return yf.download(ticker, period="10y")
-    except:
-        return pd.DataFrame()
-
-# --- 3. 运行逻辑 ---
-if not ticker_input:
-    st.info(t["welcome_info"])
-    st.markdown(t["guide_header"])
-    for i in range(1, 4): st.write(t[f"guide_{i}"])
-else:
-    with st.spinner('数据分析中...'):
-        info = get_stock_data(ticker_input)
-    
-    if info:
-        # 容错处理
-        current_pe = info['trailingPE']
-        growth_rate = info['earningsGrowth']
-        price = info['currentPrice']
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric(t["metric_price"], f"${price:.2f}" if price > 0 else "N/A")
-        col2.metric(t["metric_pe"], f"{current_pe:.2f}")
-        col3.metric(t["metric_growth"], f"{growth_rate*100:.1f}%")
-        col4.metric(t["metric_target"], f"{target_pe}")
+# 运行渲染
+if ticker_input:
+    data = get_pro_data(ticker_input)
+    if data:
+        # 显示指标
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(t["metric_price"], f"${data['price']:.2f}")
+        c2.metric(t["metric_pe"], f"{data['pe']:.2f}")
+        c3.metric(t["metric_growth"], f"{data['growth']*100:.1f}%")
+        c4.metric(t["metric_target"], f"{target_pe}")
 
         # 计算回归年数
-        if growth_rate > 0 and current_pe > 0:
-            try:
-                pe_ratio = current_pe / target_pe
-                years = math.log(pe_ratio) / math.log(1 + growth_rate) if pe_ratio > 1 else 0
-                
-                if current_pe <= target_pe:
-                    st.success(t["diag_gold_pit"])
-                elif years < 3:
-                    st.success(t["diag_attractive"])
-                    st.write(t["diag_years_msg"].format(years))
-                elif 3 <= years <= 7:
-                    st.info(t["diag_fair"])
-                    st.write(t["diag_years_msg"].format(years))
-                else:
-                    st.warning(t["diag_overheat"])
-                    st.write(t["diag_years_msg"].format(years))
-            except:
-                st.error("计算异常，请检查数据真实性。")
-
-        # 图表展示 (改为黄色风格) [cite: 2026-01-05]
-        st.subheader(t["chart_header"].format(info['longName']))
-        hist = get_stock_history(ticker_input)
-        if not hist.empty:
-            fig = go.Figure()
-            y_data = hist['Close'] if isinstance(hist['Close'], pd.Series) else hist['Close'].iloc[:, 0]
-            fig.add_trace(go.Scatter(x=hist.index, y=y_data, name='Price', line=dict(color='#FFC107', width=2)))
-            fig.update_layout(yaxis_type="log", template="plotly_dark", height=450, 
-                              paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig, use_container_width=True)
+        if data['growth'] > 0:
+            pe_r = data['pe'] / target_pe
+            years = math.log(pe_r) / math.log(1 + data['growth']) if pe_r > 1 else 0
+            st.success(t["diag_years_msg"].format(years))
+            
+            # 绘图（黄色风格） [cite: 2026-01-05]
+            hist = yf.download(ticker_input, period="5y")
+            if not hist.empty:
+                fig = go.Figure(go.Scatter(x=hist.index, y=hist['Close'].iloc[:,0] if len(hist['Close'].shape)>1 else hist['Close'], line=dict(color='#FFC107')))
+                fig.update_layout(yaxis_type="log", template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig, use_container_width=True)
     else:
         st.error(t["err_no_data"])
-
-st.markdown("---")
-st.caption("Munger Multiplier Tool | Built for Value Investors")
