@@ -14,7 +14,8 @@ st.markdown("---")
 # 侧边栏：用户输入
 with st.sidebar:
     st.header("🔍 配置中心")
-    ticker_input = st.text_input("输入股票代码 (如 GOOGL, COST, MSFT)", "GOOGL").upper()
+    # 修改前：ticker_input = st.text_input("...", "GOOGL").upper()
+ticker_input = st.text_input("输入股票代码 (如 AAPL, MSFT, COST)", "").upper()
     target_pe = st.slider("目标合理市盈率 (P/E)", 10.0, 40.0, 20.0)
     st.info("注：若遇到 Rate Limited，请稍等30秒再切换代码。")
 
@@ -51,15 +52,23 @@ def get_stock_history(ticker_symbol):
         st.error(f"图表数据抓取失败: {e}")
         return pd.DataFrame()
 
-# 运行逻辑
-if ticker_input:
-    # 稍微等一下，避免瞬间多次触发
+# --- 运行逻辑 ---
+if not ticker_input:
+    # 🌟 当用户还没输入代码时，显示这段欢迎信息 [cite: 2026-01-05]
+    st.info("👋 **欢迎使用芒格复利回归分析仪！**")
+    st.markdown("""
+    ### 快速上手指南：
+    1. **输入代码**：在左侧输入你想研究的股票代码（如 **AAPL**）。
+    2. **设定目标**：调整滑块选择你认为合理的“目标市盈率”（通常设为 20）。
+    3. **看懂结论**：系统会自动计算并给出“黄金坑”或“过热”诊断。
+    """)
+else:
+    # 只有当用户输入了代码，才会启动下面的分析逻辑 [cite: 2026-01-05]
     time.sleep(0.5)
-    
     info = get_stock_data(ticker_input)
     
     if info and 'trailingPE' in info:
-        # 提取关键指标
+        # 提取指标
         current_pe = info.get('trailingPE')
         growth_rate = info.get('earningsGrowth', 0.15)
         price = info.get('currentPrice', 0)
@@ -72,24 +81,22 @@ if ticker_input:
         col3.metric("预期利润增速", f"{growth_rate*100:.1f}%")
         col4.metric("回本目标 P/E", f"{target_pe}")
 
-# 2. 逻辑计算与自动诊断
+        # 2. 逻辑计算与自动诊断 [cite: 2026-01-05]
         if growth_rate > 0:
-            # 计算回归年数
             years = math.log(current_pe / target_pe) / math.log(1 + growth_rate) if current_pe > target_pe else 0
             
-            # 这里的标准是你设定的选股逻辑 [cite: 2026-01-05]
             if current_pe <= target_pe:
                 st.success(f"🌟 **诊断：极具吸引力（黄金坑）**")
-                st.write(f"当前 P/E ({current_pe:.2f}) 已低于目标值 ({target_pe})。内在价值极高！")
+                st.write(f"当前 P/E 已低于目标值。内在价值极高！")
             elif years < 3:
                 st.success(f"✅ **诊断：极具吸引力**")
-                st.write(f"回归年数仅为 **{years:.2f}** 年。利润增长极快，是难得的投资机会。")
+                st.write(f"回归年数仅为 **{years:.2f}** 年。利润增长极快。")
             elif 3 <= years <= 7:
                 st.info(f"⚖️ **诊断：合理区间**")
-                st.write(f"回归年数 **{years:.2f}** 年。好公司配好价格，适合长期持有。")
+                st.write(f"回归年数 **{years:.2f}** 年。好公司配好价格。")
             else:
                 st.warning(f"⚠️ **诊断：目前明显过热**")
-                st.write(f"回归年数长达 **{years:.2f}** 年。价格透支了太多增长，建议保持克制。")
+                st.write(f"回归年数长达 **{years:.2f}** 年。建议保持克制。")
         
         # 3. 历史对数图表
         hist = get_stock_history(ticker_input)
@@ -100,8 +107,8 @@ if ticker_input:
             fig.update_layout(yaxis_type="log", template="plotly_white", height=400)
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.error("🚫 触发了 Yahoo 接口限制 (Rate Limited) 或代码无效。")
-        st.info("💡 解决建议：\n1. 请在左侧换一个代码（如输入 AAPL）试试。\n2. 5分钟后再刷新网页。\n3. 如果是 A 股，请确保后缀正确，如 600519.SS。")
+        st.error("🚫 无法抓取数据。")
+        st.info("💡 建议：检查代码是否正确（如 AAPL）或 5 分钟后再试。")
 
 st.markdown("---")
 st.caption("由 Gemini 思想伙伴助力开发 | 数据源：Yahoo Finance")
