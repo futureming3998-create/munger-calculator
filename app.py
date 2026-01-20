@@ -5,26 +5,79 @@ import plotly.graph_objects as go
 import math
 import time
 
-# 页面配置
-st.set_page_config(page_title="芒格价值线工具", layout="wide")
-st.title("📈 芒格“价值线”复利回归分析仪")
+# 1. 语言字典配置 [cite: 2026-01-05]
+LANG = {
+    "中文": {
+        "title": "📈 芒格“价值线”复利回归分析仪",
+        "welcome_info": "👋 **欢迎！请在左侧输入股票代码开始分析。**",
+        "guide_header": "### 快速上手指南：",
+        "guide_1": "1. **输入代码**：在左侧输入股票代码（如 AAPL）。",
+        "guide_2": "2. **设定目标**：调整滑块选择你认为合理的“目标市盈率”。",
+        "guide_3": "3. **看懂结论**：系统自动计算“黄金坑”或“过热”诊断。",
+        "sidebar_cfg": "🔍 配置中心",
+        "input_label": "输入股票代码 (如 AAPL, MSFT, COST)",
+        "target_pe_label": "目标合理市盈率 (P/E)",
+        "rate_limit_info": "注：若遇到限制，请稍等30秒再切换代码。",
+        "metric_price": "当前股价",
+        "metric_pe": "当前 P/E (TTM)",
+        "metric_growth": "预期利润增速",
+        "metric_target": "回本目标 P/E",
+        "diag_gold_pit": "🌟 诊断：极具吸引力（黄金坑）",
+        "diag_gold_msg": "当前 P/E 已低于目标值。内在价值极高！",
+        "diag_attractive": "✅ 诊断：极具吸引力",
+        "diag_fair": "⚖️ 诊断：合理区间",
+        "diag_overheat": "⚠️ 诊断：目前明显过热",
+        "diag_years_msg": "回归年数为 **{:.2f}** 年。",
+        "chart_header": "📊 {} 十年轨迹（对数刻度）",
+        "err_no_data": "🚫 无法抓取数据，请检查代码或稍后再试。"
+    },
+    "English": {
+        "title": "📈 Munger Value Line Calculator",
+        "welcome_info": "👋 **Welcome! Enter a ticker in the sidebar to start.**",
+        "guide_header": "### Quick Start Guide:",
+        "guide_1": "1. **Enter Ticker**: Type a stock code (e.g., AAPL).",
+        "guide_2": "2. **Set Target**: Adjust the slider for target P/E.",
+        "guide_3": "3. **Read Result**: System calculates if it's a 'Value Pit'.",
+        "sidebar_cfg": "🔍 Configuration",
+        "input_label": "Enter Ticker (e.g., AAPL, MSFT, COST)",
+        "target_pe_label": "Target P/E Ratio",
+        "rate_limit_info": "Note: If Rate Limited, wait 30s before retrying.",
+        "metric_price": "Price",
+        "metric_pe": "Current P/E (TTM)",
+        "metric_growth": "Earnings Growth",
+        "metric_target": "Target P/E",
+        "diag_gold_pit": "🌟 Diagnosis: Deep Value (Golden Pit)",
+        "diag_gold_msg": "Current P/E is below target. High intrinsic value!",
+        "diag_attractive": "✅ Diagnosis: Highly Attractive",
+        "diag_fair": "⚖️ Diagnosis: Fair Value",
+        "diag_overheat": "⚠️ Diagnosis: Currently Overheated",
+        "diag_years_msg": "Payback years: **{:.2f}** years.",
+        "chart_header": "📊 {} 10-Year Trajectory (Log)",
+        "err_no_data": "🚫 Data unavailable. Please check ticker or retry later."
+    }
+}
 
-# --- 侧边栏配置 ---
+# 页面初始配置
+st.set_page_config(page_title="Munger Value Line", layout="wide")
+
+# --- 2. 侧边栏与语言切换 ---
 with st.sidebar:
-    # 🌟 这一行前面必须有 4 个空格！ [cite: 2026-01-05]
-    st.header("🔍 配置中心")
+    # 语言切换器
+    sel_lang = st.selectbox("🌐 Language / 语言", ["中文", "English"])
+    t = LANG[sel_lang]  # 映射当前语言包 [cite: 2026-01-05]
     
-    # 🌟 A股输入指南部分，前面也要有 4 个空格 [cite: 2026-01-05]
-    st.caption("⌨️ **A股输入指南：**")
-    st.caption("• 沪市(6开头)加 **.SS** (如 600519.SS)")
-    st.caption("• 深市(0/3开头)加 **.SZ** (如 002594.SZ)")
+    st.header(t["sidebar_cfg"])
     
-    # 🌟 输入组件，同样要有 4 个空格 [cite: 2026-01-05]
-    ticker_input = st.text_input("输入股票代码 (如 AAPL, MSFT, COST)", "").upper()
-    target_pe = st.slider("目标合理市盈率 (P/E)", 10.0, 40.0, 20.0)
-    st.info("注：若遇到 Rate Limited，请稍等30秒再切换股票代码。")
+    # 仅在中文模式下显示 A 股指南 [cite: 2026-01-05]
+    if sel_lang == "中文":
+        st.caption("⌨️ **A股输入指南：**")
+        st.caption("• 沪市(6)加 **.SS**; 深市(0/3)加 **.SZ**")
+    
+    ticker_input = st.text_input(t["input_label"], "").upper()
+    target_pe = st.slider(t["target_pe_label"], 10.0, 40.0, 20.0)
+    st.info(t["rate_limit_info"])
 
-# 数据抓取函数（带缓存）
+# 数据抓取函数
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
     try:
@@ -40,18 +93,18 @@ def get_stock_history(ticker):
     except:
         return pd.DataFrame()
 
-# --- 运行逻辑 ---
+# --- 3. 页面标题 ---
+st.title(t["title"])
+
+# --- 4. 运行逻辑 ---
 if not ticker_input:
-    # 🌟 初始状态：显示欢迎指南 [cite: 2026-01-05]
-    st.info("👋 **欢迎！请在左侧侧边栏输入股票代码（如 AAPL）开始分析。**")
-    st.markdown("""
-    ### 快速上手指南：
-    1. **输入代码**：在左侧输入你想研究的股票代码。
-    2. **设定目标**：调整滑块选择你认为合理的“目标市盈率”。
-    3. **看懂结论**：系统会自动告诉你这是一家“黄金坑”公司还是处于“过热”状态。
-    """)
+    # 静默模式下的欢迎指南 [cite: 2026-01-05]
+    st.info(t["welcome_info"])
+    st.markdown(t["guide_header"])
+    st.write(t["guide_1"])
+    st.write(t["guide_2"])
+    st.write(t["guide_3"])
 else:
-    # 只有当 ticker_input 不为空时才运行 [cite: 2026-01-05]
     time.sleep(0.5)
     info = get_stock_data(ticker_input)
     
@@ -61,43 +114,41 @@ else:
         price = info.get('currentPrice', 0)
         name = info.get('longName', ticker_input)
 
-        # 1. 顶部指标看板
+        # 指标看板
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("当前股价", f"${price:.2f}" if price else "N/A")
-        col2.metric("当前 P/E (TTM)", f"{current_pe:.2f}")
-        col3.metric("预期利润增速", f"{growth_rate*100:.1f}%")
-        col4.metric("回本目标 P/E", f"{target_pe}")
+        col1.metric(t["metric_price"], f"${price:.2f}" if price else "N/A")
+        col2.metric(t["metric_pe"], f"{current_pe:.2f}")
+        col3.metric(t["metric_growth"], f"{growth_rate*100:.1f}%")
+        col4.metric(t["metric_target"], f"{target_pe}")
 
-        # 2. 逻辑计算与自动诊断 [cite: 2026-01-05]
+        # 核心诊断逻辑 [cite: 2026-01-05]
         if growth_rate > 0:
             years = math.log(current_pe / target_pe) / math.log(1 + growth_rate) if current_pe > target_pe else 0
             
             if current_pe <= target_pe:
-                st.success(f"🌟 **诊断：极具吸引力（黄金坑）**")
-                st.write(f"当前 P/E ({current_pe:.2f}) 已低于目标值。复利机器在为你白干！")
+                st.success(t["diag_gold_pit"])
+                st.write(t["diag_gold_msg"])
             elif years < 3:
-                st.success(f"✅ **诊断：极具吸引力**")
-                st.write(f"回归年数仅为 **{years:.2f}** 年。利润增长极快。")
+                st.success(t["diag_attractive"])
+                st.write(t["diag_years_msg"].format(years))
             elif 3 <= years <= 7:
-                st.info(f"⚖️ **诊断：合理区间**")
-                st.write(f"回归年数 **{years:.2f}** 年。好公司配好价格。")
+                st.info(t["diag_fair"])
+                st.write(t["diag_years_msg"].format(years))
             else:
-                st.warning(f"⚠️ **诊断：目前明显过热**")
-                st.write(f"回归年数长达 **{years:.2f}** 年。建议耐心等待。")
+                st.warning(t["diag_overheat"])
+                st.write(t["diag_years_msg"].format(years))
         
-        # 3. 历史对数图表
+        # 图表展示
+        st.subheader(t["chart_header"].format(name))
         hist = get_stock_history(ticker_input)
         if not hist.empty:
-            st.subheader(f"📊 {name} 十年轨迹（对数刻度）")
             fig = go.Figure()
-            # 兼容处理 yfinance 的多层索引
             y_data = hist['Close'] if isinstance(hist['Close'], pd.Series) else hist['Close'].iloc[:, 0]
-            fig.add_trace(go.Scatter(x=hist.index, y=y_data, name='股价', line=dict(color='#1f77b4')))
+            fig.add_trace(go.Scatter(x=hist.index, y=y_data, name='Price', line=dict(color='#1f77b4')))
             fig.update_layout(yaxis_type="log", template="plotly_white", height=400)
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.error("🚫 无法抓取数据。")
-        st.info("💡 建议：检查代码是否正确（如 AAPL）或 5 分钟后再试。")
+        st.error(t["err_no_data"])
 
 st.markdown("---")
-st.caption("由 Gemini 思想伙伴助力开发 | 数据源：Yahoo Finance")
+st.caption("Munger Multiplier Analysis Tool | Powered by Gemini & Yahoo Finance")
