@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import math
 import time
 
-# --- 1. 语言字典配置 [cite: 2026-01-05] ---
+# 1. 语言字典配置 [cite: 2026-01-05]
 LANG = {
     "中文": {
         "title": "📈 芒格“价值线”复利回归分析仪",
@@ -30,8 +30,7 @@ LANG = {
         "diag_years_msg": "回归年数为 **{:.2f}** 年。",
         "chart_header": "📊 {} 十年轨迹（对数刻度）",
         "err_no_data": "🚫 无法抓取数据，请检查代码或稍后再试。",
-        "coffee_header": "☕ 请作者喝杯咖啡",
-        "coffee_body": "如果你觉得这个工具有帮助，欢迎支持！"
+        "coffee_header": "☕ 请作者喝杯咖啡"
     },
     "English": {
         "title": "📈 Munger Value Line Calculator",
@@ -43,6 +42,7 @@ LANG = {
         "sidebar_cfg": "🔍 Configuration",
         "input_label": "Enter Ticker (e.g., AAPL, MSFT)",
         "target_pe_label": "Target P/E Ratio",
+        "coffee_header": "☕ Support the Dev",
         "rate_limit_info": "Note: If Rate Limited, wait 30s before retrying.",
         "metric_price": "Price",
         "metric_pe": "Current P/E (TTM)",
@@ -55,25 +55,13 @@ LANG = {
         "diag_overheat": "⚠️ Diagnosis: Currently Overheated",
         "diag_years_msg": "Payback years: **{:.2f}** years.",
         "chart_header": "📊 {} 10-Year Trajectory (Log)",
-        "err_no_data": "🚫 Data unavailable. Please check ticker or retry later.",
-        "coffee_header": "☕ Support the Dev",
-        "coffee_body": "If you like this tool, consider supporting me!"
+        "err_no_data": "🚫 Data unavailable. Please check ticker or retry later."
     }
 }
 
 st.set_page_config(page_title="Munger Value Line", layout="wide")
 
-# --- 🌟 CSS 注入：将滑块改为黄色以呼应打赏按钮 🌟 ---
-st.markdown("""
-    <style>
-    /* 滑块颜色更改为黄色 */
-    .stSlider > div > div > div > div { background: #FFC107 !important; }
-    /* 语言选择框的红色微调（呼应截图） */
-    div[data-baseweb="select"] { border: 1px solid #FF4B4B !important; border-radius: 4px; }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- 2. 右上角语言切换逻辑 ---
+# --- 2. 布局逻辑 ---
 top_col1, top_col2 = st.columns([8, 2])
 with top_col2:
     sel_lang = st.selectbox("", ["中文", "English"], label_visibility="collapsed")
@@ -92,14 +80,31 @@ with st.sidebar:
     
     ticker_input = st.text_input(t["input_label"], "").upper()
     target_pe = st.slider(t["target_pe_label"], 10.0, 40.0, 20.0)
+    
+    # 蓝色提示框
     st.info(t["rate_limit_info"])
 
-    # --- 🌟 打赏模块：放置在侧边栏底部 🌟 ---
+    # --- 打赏按钮尺寸对齐逻辑 ---
     st.markdown("---")
     st.subheader(t["coffee_header"])
-    st.caption(t["coffee_body"])
-    # 亮黄色打赏按钮
-    st.markdown(f'''<a href="https://www.buymeacoffee.com/vcalculator" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" style="height: 45px;"></a>''', unsafe_allow_html=True)
+    # 通过 CSS 让图片宽度填满侧边栏容器，使其与上面的提示框宽度一致
+    st.markdown(f'''
+        <style>
+        .coffee-btn {{
+            display: block;
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        .coffee-btn img {{
+            width: 100%;
+            object-fit: contain;
+        }}
+        </style>
+        <a href="https://www.buymeacoffee.com/vcalculator" target="_blank" class="coffee-btn">
+            <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee">
+        </a>
+    ''', unsafe_allow_html=True)
 
 # --- 数据抓取函数 ---
 @st.cache_data(ttl=3600)
@@ -129,7 +134,6 @@ else:
     info = get_stock_data(ticker_input)
     
     if info and ('trailingPE' in info or 'forwardPE' in info):
-        # 增加保底逻辑防止 N/A
         current_pe = info.get('trailingPE') or info.get('forwardPE')
         growth_rate = info.get('earningsGrowth', 0.15)
         price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
@@ -162,10 +166,10 @@ else:
         hist = get_stock_history(ticker_input)
         if not hist.empty:
             fig = go.Figure()
-            # 兼容处理
             y_data = hist['Close'] if isinstance(hist['Close'], pd.Series) else hist['Close'].iloc[:, 0]
-            fig.add_trace(go.Scatter(x=hist.index, y=y_data, name='Price', line=dict(color='#FFC107', width=2)))
-            fig.update_layout(yaxis_type="log", template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            # 恢复默认配色
+            fig.add_trace(go.Scatter(x=hist.index, y=y_data, name='Price'))
+            fig.update_layout(yaxis_type="log", template="plotly_white", height=400)
             st.plotly_chart(fig, use_container_width=True)
     else:
         st.error(t["err_no_data"])
