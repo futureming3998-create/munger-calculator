@@ -84,7 +84,23 @@ with st.sidebar:
     ticker_input = st.text_input(t["input_label"], "").upper()
     target_pe = st.slider(t["target_pe_label"], 10.0, 40.0, 20.0)
     st.info(t["rate_limit_info"])
-
+# --- ☕ 打赏咖啡功能 ---
+    st.markdown("---")
+    if sel_lang == "中文":
+        st.subheader("☕ 请作者喝杯咖啡")
+        st.caption("如果你觉得这个工具有帮助，欢迎支持！")
+    else:
+        st.subheader("☕ Support the Dev")
+        st.caption("If you like this tool, consider supporting me!")
+    
+    # 你的专属按钮链接
+    button_html = """
+    <a href="https://www.buymeacoffee.com/vcalculator" target="_blank">
+        <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" 
+        alt="Buy Me A Coffee" style="height: 40px !important;width: 145px !important;" >
+    </a>
+    """
+    st.markdown(button_html, unsafe_allow_html=True)
 # --- 数据抓取函数 ---
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
