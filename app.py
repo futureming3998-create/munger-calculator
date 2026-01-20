@@ -102,9 +102,29 @@ with st.sidebar:
     """
     st.markdown(button_html, unsafe_allow_html=True)
 # --- 数据抓取函数 ---
+# --- 数据抓取函数 (Alpha Vantage + Yahoo 双引擎版) --- [cite: 2026-01-05]
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
+    # 将 Yahoo 后缀转换为 Alpha Vantage 格式 (SS -> SHH, SZ -> SHZ)
+    av_ticker = ticker.replace(".SS", ".SHH").replace(".SZ", ".SHZ")
+    api_key = "VQ04WNKXTQP0H7B3" # ⬅️ 记得换成你申请到的 Key [cite: 2026-01-05]
+    url = f'https://www.alphavantage.co/query?function=OVERVIEW&symbol={av_ticker}&apikey={api_key}'
+    
     try:
+        import requests
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        
+        # 如果 Alpha Vantage 有数据，就用它的，否则尝试 yfinance 兜底
+        if "Symbol" in data:
+            return {
+                'trailingPE': float(data.get('TrailingPE', 20)),
+                'earningsGrowth': float(data.get('QuarterlyEarningsGrowthYOY', 0.15)),
+                'longName': data.get('Name', ticker),
+                'currentPrice': 0.0 # 价格稍后由 yfinance 补充
+            }
+        
+        # 兜底方案：如果 API 没数据，尝试 yfinance [cite: 2026-01-05]
         tk = yf.Ticker(ticker)
         return tk.info
     except:
@@ -113,6 +133,7 @@ def get_stock_data(ticker):
 @st.cache_data(ttl=3600)
 def get_stock_history(ticker):
     try:
+        # 仅取历史股价，Yahoo 对此限制较松 [cite: 2026-01-05]
         return yf.download(ticker, period="10y")
     except:
         return pd.DataFrame()
