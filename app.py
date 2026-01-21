@@ -3,8 +3,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import math
 import requests
+import time
 
-# --- 1. 样式与配置 ---
+# --- 1. 配置与样式 ---
 st.set_page_config(page_title="Munger Value Pro", layout="wide")
 st.markdown('''
     <style>
@@ -15,45 +16,33 @@ st.markdown('''
     </style>
 ''', unsafe_allow_html=True)
 
-# --- 2. 语言包 ---
+# --- 2. 语言字典 ---
 LANG = {
     "中文": {
         "title": "📈 芒格“价值线”深度分析仪",
-        "welcome": "👋 欢迎！请在左侧输入代码开始分析。",
-        "guide_h": "### 📖 快速上手指南：",
-        "guide_1": "1. **数据源**：由 Polygon.io 提供官方原始财报。",
-        "guide_2": "2. **5年CAGR**：计算5年复合增速，平滑利润波动。",
-        "guide_3": "3. **对数曲线**：10年价格轨迹，看清复利斜率。",
+        "welcome": "👋 欢迎！输入美股代码开始。本工具由 Polygon 官方数据驱动。",
         "sb_cfg": "🔍 配置中心",
-        "ticker_label": "输入美股代码 (如 AAPL, COST)",
+        "ticker_label": "输入美股代码 (如 COST)",
         "target_pe": "目标合理 P/E",
-        "metric_price": "当前股价",
-        "metric_pe": "真实 P/E (TTM)",
         "metric_growth": "5年复合增速 (CAGR)",
         "diag_years": "⚠️ 诊断：回归合理估值约需 **{:.2f}** 年",
-        "diag_gold": "🌟 诊断：当前估值极具吸引力",
-        "err_data": "🚫 错误：API限额(每分5次)或财报不全。",
+        "err_limit": "🐢 访问太快啦！Polygon 免费版每分钟限5次请求，请等 15 秒再刷新。",
+        "err_missing": "🚫 该股票财报数据不足 5 年，无法计算平滑增速。",
         "coffee": "☕ 请作者喝杯咖啡",
-        "footer": "Munger Analysis Tool | Polygon.io Real-Data | 2026"
+        "footer": "Munger Multiplier | Official Data | 2026"
     },
     "English": {
         "title": "📈 Munger Value Line Pro",
-        "welcome": "👋 Welcome! Enter a ticker on the left.",
-        "guide_h": "### 📖 Quick Start:",
-        "guide_1": "1. **Data Source**: Official Polygon.io API.",
-        "guide_2": "2. **5Y CAGR**: Smoothed profit growth rate.",
-        "guide_3": "3. **Log Chart**: 10Y compounding trajectory.",
+        "welcome": "👋 Welcome! Enter a ticker to start. Powered by Polygon.io.",
         "sb_cfg": "🔍 Configuration",
-        "ticker_label": "Enter Ticker (e.g. AAPL, COST)",
+        "ticker_label": "Enter Ticker (e.g. COST)",
         "target_pe": "Target P/E Ratio",
-        "metric_price": "Price",
-        "metric_pe": "Real P/E (TTM)",
         "metric_growth": "5Y CAGR",
         "diag_years": "⚠️ Diagnosis: ~**{:.2f}** years to target",
-        "diag_gold": "🌟 Diagnosis: Highly Attractive",
-        "err_data": "🚫 Error: API rate limit or missing data.",
+        "err_limit": "🐢 Slow down! API limit (5/min) reached. Please wait 15s.",
+        "err_missing": "🚫 Insufficient financial history (5Y required).",
         "coffee": "☕ Buy me a coffee",
-        "footer": "Munger Analysis Tool | Polygon.io Real-Data | 2026"
+        "footer": "Munger Multiplier | Official Data | 2026"
     }
 }
 
@@ -64,84 +53,89 @@ with top_col2:
 with top_col1:
     st.title(t["title"])
 
-# --- 3. 数据抓取与 CAGR 计算 ---
-@st.cache_data(ttl=3600)
-def fetch_data(symbol, api_key):
+# --- 3. 带缓存的数据抓取引擎 ---
+@st.cache_data(ttl=3600)  # 相同股票 1 小时内只查一次 API
+def fetch_munger_data_safe(symbol, api_key):
     try:
-        # 1. 价格
-        p_res = requests.get(f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?apiKey={api_key}").json()
-        price = p_res['results'][0]['c']
-        # 2. 财报 (取5份年度财报)
-        f_res = requests.get(f"https://api.polygon.io/X/reference/financials?ticker={symbol}&timeframe=annual&limit=5&apiKey={api_key}").json()['results']
-        if len(f_res) < 2: return None
-        # PE 计算
-        eps = f_res[0]['financials']['income_statement']['basic_earnings_per_share']['value']
-        pe = price / eps if eps > 0 else 0
-        # CAGR 计算
-        n = len(f_res) - 1
-        v_final = f_res[0]['financials']['income_statement']['net_income_loss']['value']
-        v_start = f_res[-1]['financials']['income_statement']['net_income_loss']['value']
-        growth = (v_final / v_start)**(1/n) - 1 if (v_final > 0 and v_start > 0) else (v_final - v_start)/abs(v_start)
-        # 10年价格
-        h_res = requests.get(f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/2016-01-01/2026-12-31?apiKey={api_key}").json()['results']
-        return {"price": price, "pe": pe, "growth": growth, "history": pd.DataFrame(h_res), "n": n+1}
-    except: return None
+        # 1. 价格请求
+        p_resp = requests.get(f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?apiKey={api_key}")
+        if p_resp.status_code == 429: return "LIMIT"
+        price = p_resp.json()['results'][0]['c']
 
-# --- 5. 侧边栏布局 (已彻底移除 Key 输入框) ---
+        # 2. 5年财报请求
+        f_resp = requests.get(f"https://api.polygon.io/X/reference/financials?ticker={symbol}&timeframe=annual&limit=5&apiKey={api_key}")
+        if f_resp.status_code == 429: return "LIMIT"
+        fins = f_resp.json().get('results', [])
+        if len(fins) < 2: return "MISSING"
+
+        # 计算 PE 和 CAGR
+        latest = fins[0]['financials']['income_statement']
+        eps = latest.get('basic_earnings_per_share', {}).get('value', 0)
+        pe = price / eps if eps > 0 else 0
+        
+        n = len(fins) - 1
+        v_final = fins[0]['financials']['income_statement']['net_income_loss']['value']
+        v_start = fins[-1]['financials']['income_statement']['net_income_loss']['value']
+        
+        # 科学 CAGR 计算 
+        if v_final > 0 and v_start > 0:
+            growth = (v_final / v_start)**(1/n) - 1
+        else:
+            growth = (v_final - v_start) / abs(v_start)
+
+        # 3. 10年价格数据
+        h_resp = requests.get(f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/2016-01-01/2026-12-31?apiKey={api_key}")
+        h_data = pd.DataFrame(h_resp.json().get('results', []))
+
+        return {"price": price, "pe": pe, "growth": growth, "history": h_data, "n": n+1}
+    except:
+        return "ERROR"
+
+# --- 4. 侧边栏与打赏 ---
 with st.sidebar:
     st.header(t["sb_cfg"])
-    # 这里直接让用户输入股票代码，不再向用户索要 Key
     ticker = st.text_input(t["ticker_label"], "").strip().upper()
     target_pe_val = st.slider(t["target_pe"], 10.0, 50.0, 20.0)
     st.markdown("---")
     st.subheader(t["coffee"])
-    # 侧边栏打赏按钮
     st.markdown('<a href="https://www.buymeacoffee.com/vcalculator" target="_blank" class="coffee-btn"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" width="100%"></a>', unsafe_allow_html=True)
 
-# --- 6. 主逻辑渲染 (所有人直接使用) ---
+# --- 5. 主视图 ---
 if not ticker:
     st.info(t["welcome"])
-    st.markdown(t["guide_h"])
-    st.write(t["guide_1"]); st.write(t["guide_2"]); st.write(t["guide_3"])
 else:
-    # 核心：直接从系统后台 Secrets 读取你的 Key，用户完全无感
     p_key = st.secrets.get("POLY_KEY")
-    
     if not p_key:
-        st.error("🔑 部署配置错误：请管理员在 Streamlit Secrets 中设置 POLY_KEY。")
+        st.error("🔑 Secrets Error: POLY_KEY not found in backend.")
     else:
-        with st.spinner('正在调取 Polygon.io 官方财报...'):
-            data = fetch_data(ticker, p_key)
+        with st.spinner('🚀 正在穿透财报数据...'):
+            data = fetch_munger_data_safe(ticker, p_key)
         
-        if data and data['pe'] > 0:
-            # A. 顶部四项指标看板
+        if data == "LIMIT":
+            st.error(t["err_limit"])
+        elif data == "MISSING" or data == "ERROR":
+            st.error(t["err_missing"])
+        else:
+            # 渲染结果...
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric(t["metric_price"], f"${data['price']:.2f}")
-            c2.metric(t["metric_pe"], f"{data['pe']:.2f}")
-            # 此处显示的是平滑后的 5年 CAGR 真实增速
-            c3.metric(t["metric_growth"], f"{data['growth']*100:.2f}%", help=f"基于{data['n']}年利润计算的复合年化增长率")
-            c4.metric(t["target_pe"], f"{target_pe_val}")
+            c1.metric("价格", f"${data['price']:.2f}")
+            c2.metric("P/E (TTM)", f"{data['pe']:.2f}")
+            c3.metric(t["metric_growth"], f"{data['growth']*100:.2f}%")
+            c4.metric("目标 P/E", f"{target_pe_val}")
 
-            # B. 诊断结论逻辑
             if data['growth'] > 0:
                 if data['pe'] <= target_pe_val:
-                    st.success(t["diag_gold"])
+                    st.success("🌟 当前估值极具吸引力")
                 else:
-                    # 芒格回归模型计算公式 
                     y = math.log(data['pe'] / target_pe_val) / math.log(1 + data['growth'])
                     st.warning(t["diag_years"].format(y))
-            else:
-                st.error("⚠️ 该公司长期利润增速为负，不符合复利回归模型。")
-            
-            # C. 历史价格轨迹图 (对数刻度)
-            st.subheader(f"📊 {ticker} 10年价格轨迹 (对数刻度)")
+
+            # 10年价格对数曲线
+            st.subheader(f"📊 {ticker} 10年价格轨迹 (Log Scale)")
             df_h = data['history']
             df_h['t'] = pd.to_datetime(df_h['t'], unit='ms')
             fig = go.Figure(go.Scatter(x=df_h['t'], y=df_h['c'], line=dict(color='#1f77b4', width=2)))
             fig.update_layout(yaxis_type="log", template="plotly_white", height=450, margin=dict(l=0,r=0,t=20,b=0))
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.error(t["err_data"])
 
-# --- 7. 底部说明 (Footer) ---
 st.markdown(f'<div class="footer-text">{t["footer"]}</div>', unsafe_allow_html=True)
