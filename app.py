@@ -87,44 +87,61 @@ def fetch_data(symbol, api_key):
         return {"price": price, "pe": pe, "growth": growth, "history": pd.DataFrame(h_res), "n": n+1}
     except: return None
 
-# --- 4. 侧边栏 ---
+# --- 5. 侧边栏布局 (已彻底移除 Key 输入框) ---
 with st.sidebar:
     st.header(t["sb_cfg"])
-    p_key = st.text_input("Polygon API Key", value=st.secrets.get("POLY_KEY", ""), type="password")
+    # 这里直接让用户输入股票代码，不再向用户索要 Key
     ticker = st.text_input(t["ticker_label"], "").strip().upper()
     target_pe_val = st.slider(t["target_pe"], 10.0, 50.0, 20.0)
     st.markdown("---")
     st.subheader(t["coffee"])
+    # 侧边栏打赏按钮
     st.markdown('<a href="https://www.buymeacoffee.com/vcalculator" target="_blank" class="coffee-btn"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" width="100%"></a>', unsafe_allow_html=True)
 
-# --- 5. 主视图 ---
+# --- 6. 主逻辑渲染 (所有人直接使用) ---
 if not ticker:
     st.info(t["welcome"])
     st.markdown(t["guide_h"])
     st.write(t["guide_1"]); st.write(t["guide_2"]); st.write(t["guide_3"])
-elif not p_key:
-    st.warning("🔑 请输入 Polygon API Key 以启动数据抓取。")
 else:
-    with st.spinner('正在分析财报趋势...'):
-        data = fetch_data(ticker, p_key)
-    if data and data['pe'] > 0:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(t["metric_price"], f"${data['price']:.2f}")
-        c2.metric(t["metric_pe"], f"{data['pe']:.2f}")
-        c3.metric(t["metric_growth"], f"{data['growth']*100:.2f}%", help=f"基于{data['n']}年利润计算")
-        c4.metric(t["target_pe"], f"{target_pe_val}")
-        if data['growth'] > 0:
-            if data['pe'] <= target_pe_val: st.success(t["diag_gold"])
-            else:
-                y = math.log(data['pe'] / target_pe_val) / math.log(1 + data['growth'])
-                st.warning(t["diag_years"].format(y))
-        else: st.error("⚠️ 利润增速为负，不适用此模型。")
-        st.subheader(f"📊 {ticker} 10Y Price Trajectory (Log)")
-        df_h = data['history']
-        df_h['t'] = pd.to_datetime(df_h['t'], unit='ms')
-        fig = go.Figure(go.Scatter(x=df_h['t'], y=df_h['c'], line=dict(color='#1f77b4', width=2)))
-        fig.update_layout(yaxis_type="log", template="plotly_white", height=450, margin=dict(l=0,r=0,t=20,b=0))
-        st.plotly_chart(fig, use_container_width=True)
-    else: st.error(t["err_data"])
+    # 核心：直接从系统后台 Secrets 读取你的 Key，用户完全无感
+    p_key = st.secrets.get("POLY_KEY")
+    
+    if not p_key:
+        st.error("🔑 部署配置错误：请管理员在 Streamlit Secrets 中设置 POLY_KEY。")
+    else:
+        with st.spinner('正在调取 Polygon.io 官方财报...'):
+            data = fetch_data(ticker, p_key)
+        
+        if data and data['pe'] > 0:
+            # A. 顶部四项指标看板
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric(t["metric_price"], f"${data['price']:.2f}")
+            c2.metric(t["metric_pe"], f"{data['pe']:.2f}")
+            # 此处显示的是平滑后的 5年 CAGR 真实增速
+            c3.metric(t["metric_growth"], f"{data['growth']*100:.2f}%", help=f"基于{data['n']}年利润计算的复合年化增长率")
+            c4.metric(t["target_pe"], f"{target_pe_val}")
 
+            # B. 诊断结论逻辑
+            if data['growth'] > 0:
+                if data['pe'] <= target_pe_val:
+                    st.success(t["diag_gold"])
+                else:
+                    # 芒格回归模型计算公式 
+                    y = math.log(data['pe'] / target_pe_val) / math.log(1 + data['growth'])
+                    st.warning(t["diag_years"].format(y))
+            else:
+                st.error("⚠️ 该公司长期利润增速为负，不符合复利回归模型。")
+            
+            # C. 历史价格轨迹图 (对数刻度)
+            st.subheader(f"📊 {ticker} 10年价格轨迹 (对数刻度)")
+            df_h = data['history']
+            df_h['t'] = pd.to_datetime(df_h['t'], unit='ms')
+            fig = go.Figure(go.Scatter(x=df_h['t'], y=df_h['c'], line=dict(color='#1f77b4', width=2)))
+            fig.update_layout(yaxis_type="log", template="plotly_white", height=450, margin=dict(l=0,r=0,t=20,b=0))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.error(t["err_data"])
+
+# --- 7. 底部说明 (Footer) ---
 st.markdown(f'<div class="footer-text">{t["footer"]}</div>', unsafe_allow_html=True)
