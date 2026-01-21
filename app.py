@@ -1,112 +1,159 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 import math
-import requests
+import time
 
-# --- 1. UI 风格锁定 ---
-st.set_page_config(page_title="Munger Analysis Pro", layout="wide")
+# 1. 语言字典配置 [cite: 2026-01-05]
+LANG = {
+    "中文": {
+        "title": "📈 芒格“价值线”复利回归分析仪",
+        "welcome_info": "👋 **欢迎！请在左侧输入股票代码开始分析。**",
+        "guide_header": "### 快速上手指南：",
+        "guide_1": "1. **输入代码**：在左侧输入股票代码（如 AAPL）。",
+        "guide_2": "2. **设定目标**：调整滑块选择你认为合理的“目标市盈率”。",
+        "guide_3": "3. **看懂结论**：系统自动计算“黄金坑”或“过热”诊断。",
+        "sidebar_cfg": "🔍 配置中心",
+        "input_label": "输入股票代码 (如 AAPL, MSFT)",
+        "target_pe_label": "目标合理市盈率 (P/E)",
+        "rate_limit_info": "注：若遇到限制，请稍等30秒再切换代码。",
+        "metric_price": "当前股价",
+        "metric_pe": "当前 P/E (TTM)",
+        "metric_growth": "预期利润增速",
+        "metric_target": "回本目标 P/E",
+        "diag_gold_pit": "🌟 诊断：极具吸引力（黄金坑）",
+        "diag_gold_msg": "当前 P/E 已低于目标值。内在价值极高！",
+        "diag_attractive": "✅ 诊断：极具吸引力",
+        "diag_fair": "⚖️ 诊断：合理区间",
+        "diag_overheat": "⚠️ 诊断：目前明显过热",
+        "diag_years_msg": "回归年数为 **{:.2f}** 年。",
+        "chart_header": "📊 {} 十年轨迹（对数刻度）",
+        "err_no_data": "🚫 无法抓取数据，请检查代码或稍后再试。"
+    },
+    "English": {
+        "title": "📈 Munger Value Line Calculator",
+        "welcome_info": "👋 **Welcome! Enter a ticker in the sidebar to start.**",
+        "guide_header": "### Quick Start Guide:",
+        "guide_1": "1. **Enter Ticker**: Type a stock code (e.g., AAPL).",
+        "guide_2": "2. **Set Target**: Adjust the slider for target P/E.",
+        "guide_3": "3. **Read Result**: System calculates if it's a 'Value Pit'.",
+        "sidebar_cfg": "🔍 Configuration",
+        "input_label": "Enter Ticker (e.g., AAPL, MSFT)",
+        "target_pe_label": "Target P/E Ratio",
+        "rate_limit_info": "Note: If Rate Limited, wait 30s before retrying.",
+        "metric_price": "Price",
+        "metric_pe": "Current P/E (TTM)",
+        "metric_growth": "Earnings Growth",
+        "metric_target": "Target P/E",
+        "diag_gold_pit": "🌟 Diagnosis: Deep Value (Golden Pit)",
+        "diag_gold_msg": "Current P/E is below target. High intrinsic value!",
+        "diag_attractive": "✅ Diagnosis: Highly Attractive",
+        "diag_fair": "⚖️ Diagnosis: Fair Value",
+        "diag_overheat": "⚠️ Diagnosis: Currently Overheated",
+        "diag_years_msg": "Payback years: **{:.2f}** years.",
+        "chart_header": "📊 {} 10-Year Trajectory (Log)",
+        "err_no_data": "🚫 Data unavailable. Please check ticker or retry later."
+    }
+}
 
-# 侧边栏 CSS 强制对齐
-st.markdown('''
-    <style>
-    .stMetric { background: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #333; }
-    div[data-testid="stMetricValue"] > div { color: #00ffcc !important; }
-    .coffee-btn { display: block; width: 100%; border-radius: 8px; overflow: hidden; margin-top: 15px; }
-    </style>
-''', unsafe_allow_html=True)
+# 页面初始配置
+st.set_page_config(page_title="Munger Value Line", layout="wide")
 
-# --- 2. 右上角语言切换器 ---
-c_top1, c_top2 = st.columns([8, 1.2])
-with top_col2 if 'top_col2' in locals() else c_top2: # 兼容性处理
-    selected_lang = st.selectbox("", ["中文", "English"], label_visibility="collapsed")
+# --- 🌟 右上角语言切换逻辑 🌟 ---
+# 使用 columns 将页面顶部分为标题区和语言区
+top_col1, top_col2 = st.columns([8, 2])
 
-# 语言字典
-L = {
-    "中文": {
-        "title": "📈 芒格“价值线”官方数据分析仪",
-        "guide": "### 📖 快速上手：\n1. **API Key**：填入你昨晚申请的 Key。\n2. **代码**：输入 AAPL, MSFT, COST 等。\n3. **原则**：只使用 Alpha Vantage 提供的真实财报数据。",
-        "sb_key": "🔑 输入你的 API Key",
-        "sb_ticker": "输入股票代码 (如 COST)",
-        "diag_years": "⚠️ 诊断：回归合理估值约需 **{:.2f}** 年",
-        "diag_gold": "🌟 诊断：当前估值已低于目标（极具吸引力）",
-        "footer": "Munger Multiplier Tool | Official Alpha Vantage Mode",
-        "err": "🚫 获取失败。请检查 Key 是否正确，或该股是否缺少财报数据。"
-    },
-    "English": {
-        "title": "📈 Munger Value Pro (Official API)",
-        "guide": "### 📖 Quick Start:\n1. **API Key**: Enter the key you got last night.\n2. **Ticker**: Enter AAPL, MSFT, COST, etc.\n3. **Rule**: Real financial data only via Alpha Vantage.",
-        "sb_key": "🔑 Enter API Key",
-        "sb_ticker": "Enter Ticker (e.g. COST)",
-        "diag_years": "⚠️ Diagnosis: ~**{:.2f}** years to target",
-        "diag_gold": "🌟 Diagnosis: Highly Attractive (Below Target)",
-        "footer": "Munger Multiplier Tool | Official Alpha Vantage Mode",
-        "err": "🚫 Fetch failed. Check your Key or Ticker availability."
-    }
-}[selected_lang]
+with top_col2:
+    # 放置在右上角的选择框 [cite: 2026-01-05]
+    sel_lang = st.selectbox("", ["中文", "English"], label_visibility="collapsed")
+    t = LANG[sel_lang]
 
-# --- 3. 侧边栏配置 ---
+with top_col1:
+    st.title(t["title"])
+
+# --- 2. 侧边栏配置 ---
 with st.sidebar:
-    st.header("🔍 配置中心")
-    api_key = st.text_input(L["sb_key"], type="password")
-    ticker = st.text_input(L["sb_ticker"], "").strip().upper()
-    target_pe = st.slider("目标合理 P/E", 10.0, 50.0, 20.0)
-    st.markdown("---")
-    st.subheader("☕ 请作者喝杯咖啡")
-    st.markdown('<a href="https://www.buymeacoffee.com/vcalculator" target="_blank" class="coffee-btn"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png"></a>', unsafe_allow_html=True)
+    st.header(t["sidebar_cfg"])
+    
+    # 仅在中文模式下显示 A 股指南 [cite: 2026-01-05]
+    if sel_lang == "中文":
+        st.caption("⌨️ **A股输入指南：**")
+        st.caption("• 沪市(6)加 **.SS**; 深市(0/3)加 **.SZ**")
+    
+    ticker_input = st.text_input(t["input_label"], "").upper()
+    target_pe = st.slider(t["target_pe_label"], 10.0, 40.0, 20.0)
+    st.info(t["rate_limit_info"])
 
-# --- 4. 真实数据提取逻辑 ---
-def get_official_financials(symbol, key):
-    try:
-        # 获取基础财务指标
-        ov_url = f'https://www.alphavantage.co/query?function=OVERVIEW&symbol={symbol}&apikey={key}'
-        ov_data = requests.get(ov_url).json()
-        
-        # 获取实时价格 (Global Quote)
-        q_url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={key}'
-        q_data = requests.get(q_url).json()['Global Quote']
-        
-        # 严格提取真实数据，绝不兜底
-        pe = float(ov_data['PERatio'])
-        growth = float(ov_data['QuarterlyEarningsGrowthYOY'])
-        price = float(q_data['05. price'])
-        name = ov_data['Name']
-        
-        return {"price": price, "pe": pe, "growth": growth, "name": name}
-    except:
-        return None
+# --- 数据抓取函数 ---
+@st.cache_data(ttl=3600)
+def get_stock_data(ticker):
+    try:
+        tk = yf.Ticker(ticker)
+        return tk.info
+    except:
+        return None
 
-# --- 5. 主页面展示 ---
-st.title(L["title"])
+@st.cache_data(ttl=3600)
+def get_stock_history(ticker):
+    try:
+        return yf.download(ticker, period="10y")
+    except:
+        return pd.DataFrame()
 
-if not ticker:
-    st.info("👋 欢迎回来！请在左侧填入 Key 和代码开始分析。")
-    st.markdown(L["guide"]) # 首页指南
-elif not api_key:
-    st.warning("⚠️ 请输入你的 API Key 以启用真实数据抓取。")
+# --- 3. 运行逻辑 ---
+if not ticker_input:
+    # 静默模式下的欢迎指南 [cite: 2026-01-05]
+    st.info(t["welcome_info"])
+    st.markdown(t["guide_header"])
+    st.write(t["guide_1"])
+    st.write(t["guide_2"])
+    st.write(t["guide_3"])
 else:
-    with st.spinner('正在链接官方财报数据库...'):
-        data = get_official_financials(ticker, api_key)
-    
-    if data:
-        # 指标卡片
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("实时股价", f"${data['price']:.2f}")
-        c2.metric("真实 P/E (TTM)", f"{data['pe']:.2f}")
-        c3.metric("真实利润增速", f"{data['growth']*100:.1f}%")
-        c4.metric("回本目标 P/E", f"{target_pe}")
+    time.sleep(0.5)
+    info = get_stock_data(ticker_input)
+    
+    if info and 'trailingPE' in info:
+        current_pe = info.get('trailingPE')
+        growth_rate = info.get('earningsGrowth', 0.15)
+        price = info.get('currentPrice', 0)
+        name = info.get('longName', ticker_input)
 
-        # 计算年数
-        if data['pe'] > target_pe and data['growth'] > 0:
-            years = math.log(data['pe'] / target_pe) / math.log(1 + data['growth'])
-            st.warning(L["diag_years"].format(years))
-        else:
-            st.success(L["diag_gold"])
-        
-        st.caption(f"数据源确认：{data['name']} (Alpha Vantage Real-time)")
-    else:
-        st.error(L["err"])
+        # 指标看板
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric(t["metric_price"], f"${price:.2f}" if price else "N/A")
+        col2.metric(t["metric_pe"], f"{current_pe:.2f}")
+        col3.metric(t["metric_growth"], f"{growth_rate*100:.1f}%")
+        col4.metric(t["metric_target"], f"{target_pe}")
 
-# --- 6. 底部版权 ---
+        # 核心诊断逻辑 [cite: 2026-01-05]
+        if growth_rate > 0:
+            years = math.log(current_pe / target_pe) / math.log(1 + growth_rate) if current_pe > target_pe else 0
+            
+            if current_pe <= target_pe:
+                st.success(t["diag_gold_pit"])
+                st.write(t["diag_gold_msg"])
+            elif years < 3:
+                st.success(t["diag_attractive"])
+                st.write(t["diag_years_msg"].format(years))
+            elif 3 <= years <= 7:
+                st.info(t["diag_fair"])
+                st.write(t["diag_years_msg"].format(years))
+            else:
+                st.warning(t["diag_overheat"])
+                st.write(t["diag_years_msg"].format(years))
+        
+        # 图表展示
+        st.subheader(t["chart_header"].format(name))
+        hist = get_stock_history(ticker_input)
+        if not hist.empty:
+            fig = go.Figure()
+            y_data = hist['Close'] if isinstance(hist['Close'], pd.Series) else hist['Close'].iloc[:, 0]
+            fig.add_trace(go.Scatter(x=hist.index, y=y_data, name='Price', line=dict(color='#1f77b4')))
+            fig.update_layout(yaxis_type="log", template="plotly_white", height=400)
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.error(t["err_no_data"])
+
 st.markdown("---")
-st.caption(L["footer"])
+st.caption("Munger Multiplier Analysis Tool | Powered by Gemini & Yahoo Finance")
