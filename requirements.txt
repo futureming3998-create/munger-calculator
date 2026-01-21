@@ -1,4 +1,6 @@
 streamlit
-akshare
 pandas
 plotly
+akshare
+yfinance
+requests
