@@ -1,141 +1,96 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 import math
-import requests
 import time
 
-# --- 1. 配置与样式 ---
-st.set_page_config(page_title="Munger Value Pro", layout="wide")
-st.markdown('''
-    <style>
-    .stMetric { background: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #333; }
-    .coffee-btn { display: block; width: 100%; border-radius: 10px; overflow: hidden; margin-top: 10px; transition: transform 0.3s; }
-    .coffee-btn:hover { transform: scale(1.02); }
-    .footer-text { text-align: center; color: #666; padding: 20px; font-size: 0.8rem; border-top: 1px solid #333; margin-top: 50px; }
-    </style>
-''', unsafe_allow_html=True)
+# 页面配置
+st.set_page_config(page_title="芒格价值线工具", layout="wide")
+st.title("📈 芒格“价值线”复利回归分析仪")
 
-# --- 2. 语言字典 ---
-LANG = {
-    "中文": {
-        "title": "📈 芒格“价值线”深度分析仪",
-        "welcome": "👋 欢迎！输入美股代码开始。本工具由 Polygon 官方数据驱动。",
-        "sb_cfg": "🔍 配置中心",
-        "ticker_label": "输入美股代码 (如 COST)",
-        "target_pe": "目标合理 P/E",
-        "metric_growth": "5年复合增速 (CAGR)",
-        "diag_years": "⚠️ 诊断：回归合理估值约需 **{:.2f}** 年",
-        "err_limit": "🐢 访问太快啦！Polygon 免费版每分钟限5次请求，请等 15 秒再刷新。",
-        "err_missing": "🚫 该股票财报数据不足 5 年，无法计算平滑增速。",
-        "coffee": "☕ 请作者喝杯咖啡",
-        "footer": "Munger Multiplier | Official Data | 2026"
-    },
-    "English": {
-        "title": "📈 Munger Value Line Pro",
-        "welcome": "👋 Welcome! Enter a ticker to start. Powered by Polygon.io.",
-        "sb_cfg": "🔍 Configuration",
-        "ticker_label": "Enter Ticker (e.g. COST)",
-        "target_pe": "Target P/E Ratio",
-        "metric_growth": "5Y CAGR",
-        "diag_years": "⚠️ Diagnosis: ~**{:.2f}** years to target",
-        "err_limit": "🐢 Slow down! API limit (5/min) reached. Please wait 15s.",
-        "err_missing": "🚫 Insufficient financial history (5Y required).",
-        "coffee": "☕ Buy me a coffee",
-        "footer": "Munger Multiplier | Official Data | 2026"
-    }
-}
-
-top_col1, top_col2 = st.columns([7, 1.2])
-with top_col2:
-    sel_lang = st.selectbox("", ["中文", "English"], label_visibility="collapsed")
-    t = LANG[sel_lang]
-with top_col1:
-    st.title(t["title"])
-
-# --- 3. 带缓存的数据抓取引擎 ---
-@st.cache_data(ttl=3600)  # 相同股票 1 小时内只查一次 API
-def fetch_munger_data_safe(symbol, api_key):
-    try:
-        # 1. 价格请求
-        p_resp = requests.get(f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?apiKey={api_key}")
-        if p_resp.status_code == 429: return "LIMIT"
-        price = p_resp.json()['results'][0]['c']
-
-        # 2. 5年财报请求
-        f_resp = requests.get(f"https://api.polygon.io/X/reference/financials?ticker={symbol}&timeframe=annual&limit=5&apiKey={api_key}")
-        if f_resp.status_code == 429: return "LIMIT"
-        fins = f_resp.json().get('results', [])
-        if len(fins) < 2: return "MISSING"
-
-        # 计算 PE 和 CAGR
-        latest = fins[0]['financials']['income_statement']
-        eps = latest.get('basic_earnings_per_share', {}).get('value', 0)
-        pe = price / eps if eps > 0 else 0
-        
-        n = len(fins) - 1
-        v_final = fins[0]['financials']['income_statement']['net_income_loss']['value']
-        v_start = fins[-1]['financials']['income_statement']['net_income_loss']['value']
-        
-        # 科学 CAGR 计算 
-        if v_final > 0 and v_start > 0:
-            growth = (v_final / v_start)**(1/n) - 1
-        else:
-            growth = (v_final - v_start) / abs(v_start)
-
-        # 3. 10年价格数据
-        h_resp = requests.get(f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/2016-01-01/2026-12-31?apiKey={api_key}")
-        h_data = pd.DataFrame(h_resp.json().get('results', []))
-
-        return {"price": price, "pe": pe, "growth": growth, "history": h_data, "n": n+1}
-    except:
-        return "ERROR"
-
-# --- 4. 侧边栏与打赏 ---
+# --- 侧边栏配置 ---
 with st.sidebar:
-    st.header(t["sb_cfg"])
-    ticker = st.text_input(t["ticker_label"], "").strip().upper()
-    target_pe_val = st.slider(t["target_pe"], 10.0, 50.0, 20.0)
-    st.markdown("---")
-    st.subheader(t["coffee"])
-    st.markdown('<a href="https://www.buymeacoffee.com/vcalculator" target="_blank" class="coffee-btn"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" width="100%"></a>', unsafe_allow_html=True)
+    st.header("🔍 配置中心")
+    # 🌟 默认值设为空，实现静默启动 [cite: 2026-01-05]
+    ticker_input = st.text_input("输入股票代码 (如 AAPL, MSFT, COST)", "").upper()
+    target_pe = st.slider("目标合理市盈率 (P/E)", 10.0, 40.0, 20.0)
+    st.info("注：若遇到 Rate Limited，请稍等30秒再切换代码。")
 
-# --- 5. 主视图 ---
-if not ticker:
-    st.info(t["welcome"])
+# 数据抓取函数（带缓存）
+@st.cache_data(ttl=3600)
+def get_stock_data(ticker):
+    try:
+        tk = yf.Ticker(ticker)
+        return tk.info
+    except:
+        return None
+
+@st.cache_data(ttl=3600)
+def get_stock_history(ticker):
+    try:
+        return yf.download(ticker, period="10y")
+    except:
+        return pd.DataFrame()
+
+# --- 运行逻辑 ---
+if not ticker_input:
+    # 🌟 初始状态：显示欢迎指南 [cite: 2026-01-05]
+    st.info("👋 **欢迎！请在左侧侧边栏输入股票代码（如 AAPL）开始分析。**")
+    st.markdown("""
+    ### 快速上手指南：
+    1. **输入代码**：在左侧输入你想研究的股票代码。
+    2. **设定目标**：调整滑块选择你认为合理的“目标市盈率”。
+    3. **看懂结论**：系统会自动告诉你这是一家“黄金坑”公司还是处于“过热”状态。
+    """)
 else:
-    p_key = st.secrets.get("POLY_KEY")
-    if not p_key:
-        st.error("🔑 Secrets Error: POLY_KEY not found in backend.")
-    else:
-        with st.spinner('🚀 正在穿透财报数据...'):
-            data = fetch_munger_data_safe(ticker, p_key)
+    # 只有当 ticker_input 不为空时才运行 [cite: 2026-01-05]
+    time.sleep(0.5)
+    info = get_stock_data(ticker_input)
+    
+    if info and 'trailingPE' in info:
+        current_pe = info.get('trailingPE')
+        growth_rate = info.get('earningsGrowth', 0.15)
+        price = info.get('currentPrice', 0)
+        name = info.get('longName', ticker_input)
+
+        # 1. 顶部指标看板
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("当前股价", f"${price:.2f}" if price else "N/A")
+        col2.metric("当前 P/E (TTM)", f"{current_pe:.2f}")
+        col3.metric("预期利润增速", f"{growth_rate*100:.1f}%")
+        col4.metric("回本目标 P/E", f"{target_pe}")
+
+        # 2. 逻辑计算与自动诊断 [cite: 2026-01-05]
+        if growth_rate > 0:
+            years = math.log(current_pe / target_pe) / math.log(1 + growth_rate) if current_pe > target_pe else 0
+            
+            if current_pe <= target_pe:
+                st.success(f"🌟 **诊断：极具吸引力（黄金坑）**")
+                st.write(f"当前 P/E ({current_pe:.2f}) 已低于目标值。复利机器在为你白干！")
+            elif years < 3:
+                st.success(f"✅ **诊断：极具吸引力**")
+                st.write(f"回归年数仅为 **{years:.2f}** 年。利润增长极快。")
+            elif 3 <= years <= 7:
+                st.info(f"⚖️ **诊断：合理区间**")
+                st.write(f"回归年数 **{years:.2f}** 年。好公司配好价格。")
+            else:
+                st.warning(f"⚠️ **诊断：目前明显过热**")
+                st.write(f"回归年数长达 **{years:.2f}** 年。建议耐心等待。")
         
-        if data == "LIMIT":
-            st.error(t["err_limit"])
-        elif data == "MISSING" or data == "ERROR":
-            st.error(t["err_missing"])
-        else:
-            # 渲染结果...
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("价格", f"${data['price']:.2f}")
-            c2.metric("P/E (TTM)", f"{data['pe']:.2f}")
-            c3.metric(t["metric_growth"], f"{data['growth']*100:.2f}%")
-            c4.metric("目标 P/E", f"{target_pe_val}")
-
-            if data['growth'] > 0:
-                if data['pe'] <= target_pe_val:
-                    st.success("🌟 当前估值极具吸引力")
-                else:
-                    y = math.log(data['pe'] / target_pe_val) / math.log(1 + data['growth'])
-                    st.warning(t["diag_years"].format(y))
-
-            # 10年价格对数曲线
-            st.subheader(f"📊 {ticker} 10年价格轨迹 (Log Scale)")
-            df_h = data['history']
-            df_h['t'] = pd.to_datetime(df_h['t'], unit='ms')
-            fig = go.Figure(go.Scatter(x=df_h['t'], y=df_h['c'], line=dict(color='#1f77b4', width=2)))
-            fig.update_layout(yaxis_type="log", template="plotly_white", height=450, margin=dict(l=0,r=0,t=20,b=0))
+        # 3. 历史对数图表
+        hist = get_stock_history(ticker_input)
+        if not hist.empty:
+            st.subheader(f"📊 {name} 十年轨迹（对数刻度）")
+            fig = go.Figure()
+            # 兼容处理 yfinance 的多层索引
+            y_data = hist['Close'] if isinstance(hist['Close'], pd.Series) else hist['Close'].iloc[:, 0]
+            fig.add_trace(go.Scatter(x=hist.index, y=y_data, name='股价', line=dict(color='#1f77b4')))
+            fig.update_layout(yaxis_type="log", template="plotly_white", height=400)
             st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.error("🚫 无法抓取数据。")
+        st.info("💡 建议：检查代码是否正确（如 AAPL）或 5 分钟后再试。")
 
-st.markdown(f'<div class="footer-text">{t["footer"]}</div>', unsafe_allow_html=True)
+st.markdown("---")
+st.caption("由 Gemini 思想伙伴助力开发 | 数据源：Yahoo Finance")
